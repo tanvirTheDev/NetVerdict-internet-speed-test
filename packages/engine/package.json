@@ -10,7 +10,8 @@
   "scripts": {
     "build": "tsc -b --pretty",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "measure": "tsx bin/measure.ts"
+    "measure": "tsx bin/measure.ts",
+    "accuracy": "tsx bin/accuracy-run.ts"
   },
   "dependencies": {
     "@netverdict/contracts": "0.1.0"

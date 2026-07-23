@@ -5,6 +5,7 @@ import {
   type Bytes,
   type EngineError,
   type EpochMs,
+  type MeasurementServer,
   type Milliseconds,
   type Result,
   type TransferSample,
@@ -37,13 +38,50 @@ export interface TransferProvider {
   probeLatency(signal: AbortSignal): Promise<Result<LatencyProbeResult, EngineError>>;
   download(params: TransferStreamParams): Promise<Result<void, EngineError>>;
   upload(params: TransferStreamParams): Promise<Result<void, EngineError>>;
+  /**
+   * Which edge is about to serve this run. Returns `undefined` when the
+   * endpoint does not say — an unlabelled result, never an invented
+   * location.
+   */
+  describeServer(signal: AbortSignal): Promise<MeasurementServer | undefined>;
 }
 
-const DEFAULT_TIMEOUT_MS = 10_000;
+/** A round trip that takes this long is a dead endpoint, not a slow one (docs/methodology.md). */
+const LATENCY_TIMEOUT_MS = 10_000;
+/**
+ * Deliberately far above `targetDurationSeconds` (8s). A transfer timeout
+ * at or near the target duration is not a safety net, it is a speed cap:
+ * the phase is *designed* to run 8s, so setup plus any over-estimate from
+ * the quick probe pushes a healthy stream past 10s and it gets killed
+ * mid-flight. Measured here: streams aborted at exactly 10,009ms having
+ * moved 35MB of a planned 44MB.
+ */
+const TRANSFER_TIMEOUT_MS = 30_000;
 const UPLOAD_CHUNK_BYTES = 64 * 1024;
 
 function combinedSignal(signal: AbortSignal, timeoutMs: number): AbortSignal {
   return AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
+}
+
+/**
+ * A rejected HTTP status, split by whether the endpoint is throttling us
+ * or refusing us. `speed.cloudflare.com` returns 429 to a client that
+ * tests repeatedly — reproducible within a few back-to-back runs — and
+ * collapsing that into ENDPOINT_REJECTED made a rate-limited run
+ * indistinguishable from a connection that simply produced no download.
+ */
+function classifyHttpStatus(
+  status: number,
+  phase: EngineError['phase'],
+  label: string,
+): EngineError {
+  const rateLimited = status === 429;
+  return {
+    code: rateLimited ? 'ENDPOINT_RATE_LIMITED' : 'ENDPOINT_REJECTED',
+    phase,
+    retriable: rateLimited,
+    message: `${label} got HTTP ${String(status)}`,
+  };
 }
 
 function classifyFetchFailure(
@@ -100,8 +138,41 @@ export class CloudflareTransferProvider implements TransferProvider {
     this.fetchImpl = fetchImpl ?? globalThis.fetch.bind(globalThis);
   }
 
+  /**
+   * `/cdn-cgi/trace` rather than the headers on `__down`: the POP code
+   * only appears there in `CF-RAY`, which is not in the endpoint's
+   * `Access-Control-Expose-Headers` and so is invisible to a browser.
+   * `/cdn-cgi/trace` answers with `Access-Control-Allow-Origin: *` and a
+   * plain `key=value` body, and is readable in both environments.
+   *
+   * Never throws: a run whose speed measured fine but whose POP lookup
+   * failed is a labelled-as-unknown result, not a failed test.
+   */
+  async describeServer(signal: AbortSignal): Promise<MeasurementServer | undefined> {
+    try {
+      const response = await this.fetchImpl(`${this.endpoint}/cdn-cgi/trace`, {
+        signal: combinedSignal(signal, LATENCY_TIMEOUT_MS),
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        return undefined;
+      }
+      const fields = new Map(
+        (await response.text())
+          .split('\n')
+          .map((line) => line.split('=', 2))
+          .filter((parts): parts is [string, string] => parts.length === 2),
+      );
+      const colo = fields.get('colo');
+      const country = fields.get('loc');
+      return colo && country ? { colo, country } : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   async probeLatency(signal: AbortSignal): Promise<Result<LatencyProbeResult, EngineError>> {
-    const probeSignal = combinedSignal(signal, DEFAULT_TIMEOUT_MS);
+    const probeSignal = combinedSignal(signal, LATENCY_TIMEOUT_MS);
     const startedAt = performance.now();
     try {
       const response = await this.fetchImpl(`${this.endpoint}/__down?bytes=0`, {
@@ -110,12 +181,7 @@ export class CloudflareTransferProvider implements TransferProvider {
       });
       const rttMs = asMilliseconds(performance.now() - startedAt);
       if (!response.ok) {
-        return err({
-          code: 'ENDPOINT_REJECTED',
-          phase: 'idle_latency',
-          retriable: true,
-          message: `Latency probe got HTTP ${String(response.status)}`,
-        });
+        return err(classifyHttpStatus(response.status, 'idle_latency', 'Latency probe'));
       }
       // Draining the (empty) body lets the connection be reused by the next probe.
       await response.body?.cancel();
@@ -123,7 +189,7 @@ export class CloudflareTransferProvider implements TransferProvider {
     } catch (cause) {
       if (probeSignal.aborted && !signal.aborted) {
         // Our own timeout fired, not a caller-initiated abort — a timed-out probe, not an error.
-        return ok({ rttMs: asMilliseconds(DEFAULT_TIMEOUT_MS), timedOut: true });
+        return ok({ rttMs: asMilliseconds(LATENCY_TIMEOUT_MS), timedOut: true });
       }
       return err(classifyFetchFailure(cause, signal, 'idle_latency'));
     }
@@ -131,19 +197,14 @@ export class CloudflareTransferProvider implements TransferProvider {
 
   async download(params: TransferStreamParams): Promise<Result<void, EngineError>> {
     const { streamId, byteTarget, clock, testStartMs, onSample, signal } = params;
-    const requestSignal = combinedSignal(signal, DEFAULT_TIMEOUT_MS);
+    const requestSignal = combinedSignal(signal, TRANSFER_TIMEOUT_MS);
     try {
       const response = await this.fetchImpl(`${this.endpoint}/__down?bytes=${String(byteTarget)}`, {
         signal: requestSignal,
         cache: 'no-store',
       });
       if (!response.ok) {
-        return err({
-          code: 'ENDPOINT_REJECTED',
-          phase: 'download',
-          retriable: true,
-          message: `Download endpoint got HTTP ${String(response.status)}`,
-        });
+        return err(classifyHttpStatus(response.status, 'download', 'Download endpoint'));
       }
       if (!response.body) {
         return err({
@@ -223,12 +284,7 @@ export class CloudflareTransferProvider implements TransferProvider {
         settle(
           xhr.status >= 200 && xhr.status < 300
             ? ok(undefined)
-            : err({
-                code: 'ENDPOINT_REJECTED',
-                phase: 'upload',
-                retriable: true,
-                message: `Upload endpoint got HTTP ${String(xhr.status)}`,
-              }),
+            : err(classifyHttpStatus(xhr.status, 'upload', 'Upload endpoint')),
         );
       };
       xhr.onerror = () => {
@@ -248,7 +304,7 @@ export class CloudflareTransferProvider implements TransferProvider {
             code: 'TIMEOUT',
             phase: 'upload',
             retriable: true,
-            message: `Upload exceeded ${String(DEFAULT_TIMEOUT_MS)}ms`,
+            message: `Upload exceeded ${String(TRANSFER_TIMEOUT_MS)}ms`,
           }),
         );
       };
@@ -277,7 +333,7 @@ export class CloudflareTransferProvider implements TransferProvider {
       signal.addEventListener('abort', onAbort, { once: true });
 
       xhr.open('POST', `${this.endpoint}/__up`);
-      xhr.timeout = DEFAULT_TIMEOUT_MS;
+      xhr.timeout = TRANSFER_TIMEOUT_MS;
       xhr.send(createRandomPayload(byteTarget));
     });
   }
@@ -286,7 +342,7 @@ export class CloudflareTransferProvider implements TransferProvider {
     params: TransferStreamParams,
   ): Promise<Result<void, EngineError>> {
     const { streamId, byteTarget, clock, testStartMs, onSample, signal } = params;
-    const requestSignal = combinedSignal(signal, DEFAULT_TIMEOUT_MS);
+    const requestSignal = combinedSignal(signal, TRANSFER_TIMEOUT_MS);
     let bytesSent = 0;
 
     // NOTE (§5.7 honesty): this observes the rate at which we *enqueue*
@@ -323,12 +379,7 @@ export class CloudflareTransferProvider implements TransferProvider {
         cache: 'no-store',
       });
       if (!response.ok) {
-        return err({
-          code: 'ENDPOINT_REJECTED',
-          phase: 'upload',
-          retriable: true,
-          message: `Upload endpoint got HTTP ${String(response.status)}`,
-        });
+        return err(classifyHttpStatus(response.status, 'upload', 'Upload endpoint'));
       }
       await response.body?.cancel();
       return ok(undefined);

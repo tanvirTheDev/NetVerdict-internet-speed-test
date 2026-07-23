@@ -14,6 +14,19 @@ function sample(atMs: number, bytes: number, streamId = 'stream-1'): TransferSam
   return { atMs, bytes, streamId };
 }
 
+/**
+ * A slow-start ramp starting at `startMs`. Warm-up is measured from a
+ * transfer's own first byte, so every fixture that expects steady-state
+ * windows has to include the ramp those windows come after.
+ */
+function ramp(startMs: number, streamId = 'stream-1'): TransferSample[] {
+  return [
+    sample(startMs, 999_999, streamId),
+    sample(startMs + 750, 999_999, streamId),
+    sample(startMs + 1_250, 999_999, streamId),
+  ];
+}
+
 describe('computeWindowedThroughput', () => {
   it('returns an empty array when every sample falls inside the warm-up period', () => {
     const samples = [sample(0, 100_000), sample(500, 100_000), sample(1_499, 100_000)];
@@ -26,7 +39,7 @@ describe('computeWindowedThroughput', () => {
     // Every sample lands exactly windowMs apart and exactly at a bucket boundary —
     // the case that used to collapse the last bucket's duration to ~0 (fixed by
     // anchoring bucket width to a fixed windowMs instead of the sample span).
-    const samples: TransferSample[] = [];
+    const samples: TransferSample[] = ramp(0);
     for (let i = 0; i < 10; i += 1) {
       samples.push(sample(1_500 + i * 250, 250_000));
     }
@@ -43,6 +56,8 @@ describe('computeWindowedThroughput', () => {
 
   it('aggregates bytes across parallel streams landing in the same window', () => {
     const samples: TransferSample[] = [
+      ...ramp(0, 'stream-a'),
+      ...ramp(0, 'stream-b'),
       sample(1_500, 150_000, 'stream-a'),
       sample(1_500, 100_000, 'stream-b'),
     ];
@@ -69,8 +84,34 @@ describe('computeWindowedThroughput', () => {
     expect(readings[0]).toBeCloseTo(8, 10);
   });
 
+  it('measures the warm-up from the transfer’s own first byte, not from the start of the test', () => {
+    // Upload begins ~10s into a run, so `atMs` there is ~10,000 before a
+    // single byte has moved. Comparing that against warmupMs directly
+    // clears the bar trivially and lets the whole slow-start ramp into
+    // the median — the reported upload figure then sits far below what
+    // the link sustains.
+    function readingsForTransferStartingAt(startMs: number) {
+      const samples: TransferSample[] = ramp(startMs);
+      for (let i = 0; i < 6; i += 1) {
+        samples.push(sample(startMs + 1_500 + i * 250, 250_000));
+      }
+      return computeWindowedThroughput(samples, { warmupMs: WARMUP_MS, windowMs: WINDOW_MS });
+    }
+
+    const download = readingsForTransferStartingAt(0);
+    const upload = readingsForTransferStartingAt(10_000);
+
+    // Same transfer, same ramp, different position in the test timeline —
+    // the ramp must be discarded identically in both.
+    expect(upload).toEqual(download);
+    expect(upload).toHaveLength(6);
+    for (const reading of upload) {
+      expect(reading).toBeCloseTo(8, 10); // ramp excluded; 999,999-byte ramp samples would blow this up
+    }
+  });
+
   it('models a mid-test stall as one low window without corrupting the others', () => {
-    const samples: TransferSample[] = [];
+    const samples: TransferSample[] = ramp(0);
     for (let i = 0; i < 10; i += 1) {
       // window index 4 stalls: zero bytes that round
       samples.push(sample(1_500 + i * 250, i === 4 ? 0 : 250_000));

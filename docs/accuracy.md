@@ -19,6 +19,44 @@ engine change without a refreshed table here does not ship** (§11).
    the two indicates main-thread contamination of the measurement
    timing (§8.1) and blocks the merge until fixed.
 
+### Running our side
+
+```bash
+npm run accuracy --workspace=packages/engine          # 5 runs, 300s cooldown
+npm run accuracy --workspace=packages/engine -- --runs=8 --cooldown=600
+```
+
+`packages/engine/bin/accuracy-run.ts` performs step 2's NetVerdict half
+and step 3's arithmetic, printing each run plus the median and spread of
+every metric. Two things it deliberately handles rather than leaving to
+whoever runs it:
+
+- **Rate limiting.** Cloudflare answers 429 to a client testing
+  repeatedly, and a throttled run measures nothing. Each run blocks until
+  the endpoint actually answers again instead of pacing by a guessed
+  sleep, so a comparison is never quietly built on throttled numbers.
+  Note that throttling tracks recent _bytes_, not request count, so the
+  readiness check is necessary but not sufficient — at 90s spacing, runs
+  2 and 3 of a 5-run series both had their download phase refused while
+  the cheap check passed. Hence the 300s default.
+- **Honest gaps.** A phase that failed is recorded as a gap with its
+  error code, never dropped from the series — a median taken only over
+  the runs that happened to succeed is a flattering median.
+
+The reference tools are browser-only and cannot be driven from here. Run
+speedtest.net by hand, once between each NetVerdict run — that is what
+"interleaved" means in step 2, and it matters because link conditions
+drift over the minutes a full comparison takes.
+
+### Interpreting the comparison
+
+NetVerdict measures to Cloudflare's nearest edge; speedtest.net usually
+picks a server **inside your ISP's network**. That is a genuinely shorter
+path, so a gap in the reference's favour is expected and is not by itself
+an accuracy defect — see the server section of `methodology.md`. What the
+comparison is really checking is that our figure tracks the reference
+_proportionally_ across runs and does not drift, collapse, or exceed it.
+
 ## Results log
 
 | Date       | Engine version | Link                               | NetVerdict (median)                              | Reference (median) | Delta   | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |

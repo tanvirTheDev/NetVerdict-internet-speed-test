@@ -139,7 +139,7 @@ export function useMeasurement(endpoint = 'https://speed.cloudflare.com') {
     latencySamplesRef.current = [];
     flushNow({ ...INITIAL_STATE, status: 'running' });
     const worker = ensureWorker();
-    const command: WorkerCommand = { type: 'start', endpoint, runBufferbloat: false };
+    const command: WorkerCommand = { type: 'start', endpoint, runBufferbloat: true };
     worker.postMessage(command);
   }, [ensureWorker, endpoint, flushNow]);
 

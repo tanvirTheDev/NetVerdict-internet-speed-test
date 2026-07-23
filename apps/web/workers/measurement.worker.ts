@@ -42,6 +42,7 @@ function startMeasurement(command: Extract<WorkerCommand, { type: 'start' }>): v
       userAgentClass: self.navigator.userAgent,
       tzOffsetMinutes: new Date().getTimezoneOffset(),
       engineVersion: ENGINE_VERSION,
+      measureBufferbloat: command.runBufferbloat,
     },
     { provider, clock },
     postEvent,

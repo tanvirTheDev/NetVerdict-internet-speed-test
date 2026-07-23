@@ -1,13 +1,12 @@
-import type { TestResult } from '@netverdict/contracts';
+import { BUFFERBLOAT_GRADES, type BufferbloatGrade, type TestResult } from '@netverdict/contracts';
 
 /**
  * Converts raw measurements into the plain-language capability checks
  * §1.4 of the build brief calls for ("supports 4K streaming ✓, 3
  * simultaneous video calls ✓, competitive gaming ✗"). Thresholds are
  * documented estimates (mirrored in `docs/methodology.md`) — a capability
- * this build cannot honestly assess (gaming needs bufferbloat, landing in
- * Phase 3) is reported `unavailable`, never guessed from a proxy metric
- * that would overstate it (§5.7 rule 6).
+ * that a given run could not honestly assess is reported `unavailable`,
+ * never guessed from a proxy metric that would overstate it (§5.7 rule 6).
  */
 
 // Netflix's published guidance: 5 Mbps for HD, 25 Mbps for Ultra HD/4K.
@@ -21,6 +20,29 @@ const GROUP_VIDEO_MIN_UP_MBPS = 3;
 // Above this, unloaded latency alone already predicts a poor call — below it,
 // the call *might* still be fine, but loaded latency (Phase 3) is what actually decides.
 const GROUP_VIDEO_MAX_IDLE_LATENCY_MS = 150;
+
+/**
+ * Competitive play tolerates a small, steady queueing delay but not a
+ * large one; B is the last grade where the added delay stays inside the
+ * band a fast-paced game survives (§5.4's v1 profile puts B at ≤60ms of
+ * increase over idle).
+ */
+const GAMING_ACCEPTABLE_GRADES = new Set<BufferbloatGrade>(['A+', 'A', 'B']);
+
+/**
+ * The worse of the two grades decides, because a connection is only as
+ * playable as its worst direction — and on asymmetric consumer links the
+ * upload side is usually the one that ruins a game.
+ */
+function worseBufferbloatGrade(
+  down: BufferbloatGrade | 'unavailable',
+  up: BufferbloatGrade | 'unavailable',
+): BufferbloatGrade | 'unavailable' {
+  if (down === 'unavailable' || up === 'unavailable') {
+    return 'unavailable';
+  }
+  return BUFFERBLOAT_GRADES.indexOf(down) >= BUFFERBLOAT_GRADES.indexOf(up) ? down : up;
+}
 
 export type CapabilityVerdict =
   | { readonly status: 'supported' }
@@ -80,14 +102,21 @@ export function translateToRealWorldCapabilities(result: TestResult): RealWorldT
             reason: `needs ~${String(GROUP_VIDEO_MIN_DOWN_MBPS)}↓/${String(GROUP_VIDEO_MIN_UP_MBPS)}↑ Mbps and low latency`,
           };
 
-  // Gaming suitability hinges on loaded latency under saturation, not idle
-  // latency — idle latency alone would systematically overstate it (a link
-  // can have great idle latency and still be unplayable under load). That
-  // measurement is Phase 3 work (§5.4); never substitute a proxy here.
-  const gaming: CapabilityVerdict = {
-    status: 'unavailable',
-    reason: 'needs bufferbloat data — a later build phase',
-  };
+  // Gaming suitability hinges on latency *under load*, not idle latency —
+  // a link can have excellent idle latency and still be unplayable the
+  // moment anything else in the house starts downloading. The bufferbloat
+  // grade is exactly that measurement, so it decides this verdict; idle
+  // latency is never substituted for it (§5.7 rule 6).
+  const worstGrade = worseBufferbloatGrade(result.bufferbloatGradeDown, result.bufferbloatGradeUp);
+  const gaming: CapabilityVerdict =
+    worstGrade === 'unavailable'
+      ? { status: 'unavailable', reason: 'needs a bufferbloat grade' }
+      : GAMING_ACCEPTABLE_GRADES.has(worstGrade)
+        ? { status: 'supported' }
+        : {
+            status: 'not-supported',
+            reason: `bufferbloat grade ${worstGrade} — latency spikes under load`,
+          };
 
   return { streaming4k, streamingHd, videoCalls, gaming };
 }

@@ -15,6 +15,34 @@ export interface WindowingOptions {
 }
 
 /**
+ * The samples a phase actually gets to report on: everything after its
+ * own slow-start ramp.
+ *
+ * `atMs` is stamped relative to the *test's* start, not the phase's, so
+ * comparing it to `warmupMs` directly asks "is this sample more than
+ * 1.5s into the whole test" — which is not the question. Upload begins
+ * ~10s into a run, so every one of its samples clears that bar and the
+ * entire ramp lands in the median, dragging the reported figure well
+ * below what the link sustains; download gets an arbitrary partial
+ * discard that varies with how long idle latency happened to take. The
+ * ramp is anchored to the first sample instead, i.e. to when bytes
+ * actually started flowing — which is what
+ * `docs/methodology.md` promises ("the first 1,500 ms of the transfer")
+ * and when slow-start genuinely begins. Connection setup before the
+ * first byte is not part of the ramp.
+ */
+export function steadyStateSamples(
+  samples: readonly TransferSample[],
+  warmupMs: Milliseconds,
+): readonly TransferSample[] {
+  if (samples.length === 0) {
+    return [];
+  }
+  const transferStartMs = Math.min(...samples.map((sample) => sample.atMs));
+  return samples.filter((sample) => sample.atMs >= transferStartMs + warmupMs);
+}
+
+/**
  * Discards the warm-up ramp, then buckets the remaining samples into
  * consecutive `windowMs`-wide windows (aligned to the first post-warmup
  * sample), summing bytes **across every parallel stream** in each
@@ -30,7 +58,7 @@ export function computeWindowedThroughput(
   samples: readonly TransferSample[],
   options: WindowingOptions,
 ): readonly Mbps[] {
-  const steadyState = samples.filter((sample) => sample.atMs >= options.warmupMs);
+  const steadyState = steadyStateSamples(samples, options.warmupMs);
   if (steadyState.length === 0) {
     return [];
   }

@@ -81,6 +81,26 @@ export const CONNECTION_TYPES = [
 export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 
 /**
+ * Which edge actually served the transfer.
+ *
+ * A speed test's headline number is meaningless without it. Cloudflare's
+ * endpoint is anycast, so the POP is chosen by the network, not by us —
+ * and the figure describes the path to *that* POP. A reference tool
+ * pointed at a server inside the ISP's own network measures a shorter,
+ * cheaper path and will read higher; without this recorded, that gap
+ * looks like a defect in one of the two tools rather than the different
+ * question each is answering.
+ */
+export const measurementServerSchema = z.object({
+  /** Cloudflare POP code — an IATA airport code, e.g. `DAC` for Dhaka. */
+  colo: z.string().min(1),
+  /** ISO country of the POP, e.g. `BD`. */
+  country: z.string().min(1),
+});
+
+export type MeasurementServer = z.infer<typeof measurementServerSchema>;
+
+/**
  * What was true about the run itself — needed to judge whether a number
  * should be trusted (§5.7 rule 3). None of this is optional decoration;
  * it is what makes a suspicious result explicable instead of mysterious.
@@ -91,6 +111,8 @@ export const testConditionsSchema = z.object({
   dayBucket: dayBucketSchema,
   connectionType: z.enum(CONNECTION_TYPES),
   endpoint: z.string().min(1),
+  /** Absent when the endpoint did not tell us which POP served the run — reported as unknown, never guessed. */
+  server: measurementServerSchema.optional(),
   userAgentClass: z.string().min(1),
   engineVersion: z.string().min(1),
   schemaVersion: z.literal(1),

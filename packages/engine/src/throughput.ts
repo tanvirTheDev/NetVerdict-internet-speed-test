@@ -10,7 +10,12 @@ import {
   type TransferSample,
 } from '@netverdict/contracts';
 import { median, percentile } from './percentiles';
-import { computeWindowedThroughput, totalBytesTransferred, uniqueStreamCount } from './windowing';
+import {
+  computeWindowedThroughput,
+  steadyStateSamples,
+  totalBytesTransferred,
+  uniqueStreamCount,
+} from './windowing';
 
 export interface ThroughputComputationOptions {
   warmupMs: Milliseconds;
@@ -50,7 +55,7 @@ export function computeThroughputResult(
   }
 
   const mbps = options.statistic === 'median' ? median(windowedMbps) : percentile(windowedMbps, 90);
-  const steadyStateCount = samples.filter((sample) => sample.atMs >= options.warmupMs).length;
+  const steadyStateCount = steadyStateSamples(samples, options.warmupMs).length;
 
   return ok({
     mbps,

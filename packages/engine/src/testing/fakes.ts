@@ -4,6 +4,7 @@ import {
   ok,
   type EngineError,
   type EpochMs,
+  type MeasurementServer,
   type Result,
   type TransferSample,
 } from '@netverdict/contracts';
@@ -32,15 +33,25 @@ export class FakeClock implements Clock {
   advance(byMs: number): void {
     this.currentMs = asEpochMs(this.currentMs + byMs);
   }
+
+  /** Jumps the clock instead of waiting — fake time is the point (§2.8: no test calls `sleep`). */
+  sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    if (!signal?.aborted) {
+      this.advance(ms);
+    }
+    return Promise.resolve();
+  }
 }
 
 export interface FakeTransferScript {
   /** Consumed in order, one per `probeLatency()` call; cycles once exhausted. */
   latencyRttsMs: readonly number[];
-  /** Replayed verbatim (with `streamId` substituted) for every `download()` call. */
+  /** Replayed (with `streamId` substituted) for every `download()` call. `atMs` is an offset from when that call started. */
   downloadSamplesPerStream: readonly Omit<TransferSample, 'streamId'>[];
-  /** Replayed verbatim (with `streamId` substituted) for every `upload()` call. */
+  /** Replayed (with `streamId` substituted) for every `upload()` call. `atMs` is an offset from when that call started. */
   uploadSamplesPerStream: readonly Omit<TransferSample, 'streamId'>[];
+  /** Omit to model an endpoint that does not report which POP served the run. */
+  server?: MeasurementServer;
 }
 
 /**
@@ -50,9 +61,16 @@ export interface FakeTransferScript {
  */
 export class FakeTransferProvider implements TransferProvider {
   readonly endpoint = 'fake://test';
+  readonly downloadByteTargets: number[] = [];
+  /** One entry per `download()` call — a stream appearing twice means the phase re-issued on it. */
+  readonly downloadStreamIds: string[] = [];
   private latencyCallIndex = 0;
 
   constructor(private readonly script: FakeTransferScript) {}
+
+  describeServer(): Promise<MeasurementServer | undefined> {
+    return Promise.resolve(this.script.server);
+  }
 
   probeLatency(): Promise<Result<LatencyProbeResult, EngineError>> {
     const rttMs =
@@ -62,16 +80,44 @@ export class FakeTransferProvider implements TransferProvider {
   }
 
   download(params: TransferStreamParams): Promise<Result<void, EngineError>> {
-    for (const sample of this.script.downloadSamplesPerStream) {
-      params.onSample({ ...sample, streamId: params.streamId });
-    }
-    return Promise.resolve(ok(undefined));
+    this.downloadByteTargets.push(params.byteTarget);
+    this.downloadStreamIds.push(params.streamId);
+    return Promise.resolve(this.replay(this.script.downloadSamplesPerStream, params));
   }
 
   upload(params: TransferStreamParams): Promise<Result<void, EngineError>> {
-    for (const sample of this.script.uploadSamplesPerStream) {
-      params.onSample({ ...sample, streamId: params.streamId });
+    return Promise.resolve(this.replay(this.script.uploadSamplesPerStream, params));
+  }
+
+  /**
+   * Replays a script and advances the clock past it, because a transfer
+   * that consumed no time is not a transfer. The orchestrator ends a
+   * throughput phase on a deadline and re-issues requests on streams that
+   * finish early — against a provider that never moves the clock, that
+   * loop would never reach its deadline and the test would hang. Sample
+   * timestamps are offsets from when this call began, so a re-issued
+   * request lands *after* the one before it rather than replaying the
+   * same instants.
+   */
+  private replay(
+    script: readonly Omit<TransferSample, 'streamId'>[],
+    params: TransferStreamParams,
+  ): Result<void, EngineError> {
+    if (script.length === 0) {
+      return ok(undefined);
     }
-    return Promise.resolve(ok(undefined));
+    const startedAtMs = params.clock.now() - params.testStartMs;
+    for (const sample of script) {
+      params.onSample({
+        atMs: startedAtMs + sample.atMs,
+        bytes: sample.bytes,
+        streamId: params.streamId,
+      });
+    }
+    const scriptSpanMs = Math.max(...script.map((sample) => sample.atMs));
+    if (params.clock instanceof FakeClock) {
+      params.clock.advance(scriptSpanMs);
+    }
+    return ok(undefined);
   }
 }

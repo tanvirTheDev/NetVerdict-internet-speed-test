@@ -1,10 +1,12 @@
 'use client';
 
+import { useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useMeasurement } from '../../../hooks/use-measurement';
+import { congestionFromLatency } from '../../../lib/render-capability';
 import { t } from '../../../i18n/index';
+import { DataFlowGauge } from './DataFlowGauge';
 import { ErrorPanel } from './ErrorPanel';
-import { LiveGauge } from './LiveGauge';
 import { LiveLatency } from './LiveLatency';
 import { PhaseIndicator } from './PhaseIndicator';
 import { ResultCard } from './ResultCard';
@@ -33,6 +35,43 @@ function PrimaryButton({
 
 export function TestScreen() {
   const { state, start, stop } = useMeasurement();
+
+  /**
+   * Everything the field is drawn from, derived only from measurements
+   * that actually happened.
+   *
+   * The ceiling is the fastest reading this run has produced, so the
+   * field fills the frame on a 30 Mbps line and a 900 Mbps line alike
+   * without anyone hard-coding what "fast" means. It is a drawing scale,
+   * never a reported figure.
+   */
+  const flow = useMemo(() => {
+    const peakMbps = state.throughputHistory.reduce((max, point) => Math.max(max, point.mbps), 0);
+    const loaded = state.latencySamples.filter((s) => s.underLoad !== 'none' && !s.timedOut);
+    const idle = state.latencySamples.filter((s) => s.underLoad === 'none' && !s.timedOut);
+    const mean = (xs: readonly number[]) =>
+      xs.length > 0 ? xs.reduce((a, b) => a + b, 0) / xs.length : undefined;
+
+    // Jitter over a short trailing window, so turbulence tracks how the
+    // link behaves *now* rather than averaging the whole run flat.
+    const recent = state.latencySamples.slice(-8).filter((s) => !s.timedOut);
+    const jitterMs =
+      recent.length >= 2
+        ? recent
+            .slice(1)
+            .reduce((sum, s, i) => sum + Math.abs(s.rttMs - (recent[i]?.rttMs ?? s.rttMs)), 0) /
+          (recent.length - 1)
+        : 0;
+
+    return {
+      ceilingMbps: Math.max(1, peakMbps),
+      jitterMs,
+      congestion: congestionFromLatency(
+        mean(idle.map((s) => s.rttMs)),
+        mean(loaded.map((s) => s.rttMs)),
+      ),
+    };
+  }, [state.throughputHistory, state.latencySamples]);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-8 p-6">
@@ -74,7 +113,13 @@ export function TestScreen() {
               <LiveLatency samples={state.latencySamples} />
             ) : (
               <>
-                <LiveGauge mbps={state.instantaneousMbps} phase={state.throughputPhase} />
+                <DataFlowGauge
+                  mbps={state.instantaneousMbps}
+                  ceilingMbps={flow.ceilingMbps}
+                  direction={state.throughputPhase}
+                  jitterMs={flow.jitterMs}
+                  congestion={flow.congestion}
+                />
                 <ThroughputChart history={state.throughputHistory} />
               </>
             )}

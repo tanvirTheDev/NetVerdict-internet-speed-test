@@ -13,14 +13,35 @@ function sample(atMs: number, bytes: number, streamId = 'stream-1'): TransferSam
   return { atMs, bytes, streamId };
 }
 
+/**
+ * The slow-start ramp a real transfer opens with. These samples anchor
+ * the phase clock — warm-up is measured from the first byte of *this*
+ * transfer, not from the start of the whole test — and must never reach
+ * the reported windows. Bytes are round so totals stay checkable by eye.
+ */
+const RAMP: readonly Omit<TransferSample, 'streamId'>[] = [
+  { atMs: 0, bytes: 500_000 },
+  { atMs: 750, bytes: 500_000 },
+  { atMs: 1_250, bytes: 500_000 },
+];
+const RAMP_BYTES = 1_500_000;
+
 function evenSamples(
   count: number,
   bytesPerWindow: number,
   streamId = 'stream-1',
 ): TransferSample[] {
-  return Array.from({ length: count }, (_unused, i) =>
-    sample(1_500 + i * 250, bytesPerWindow, streamId),
-  );
+  return [
+    ...RAMP.map((r) => sample(r.atMs, r.bytes, streamId)),
+    ...Array.from({ length: count }, (_unused, i) =>
+      sample(1_500 + i * 250, bytesPerWindow, streamId),
+    ),
+  ];
+}
+
+/** Index of the nth steady-state sample inside an `evenSamples` array. */
+function steadyIndex(n: number): number {
+  return RAMP.length + n;
 }
 
 describe('computeThroughputResult', () => {
@@ -48,7 +69,9 @@ describe('computeThroughputResult', () => {
       expect(result.value.sampleCount).toBe(10);
       expect(result.value.warmupDiscardedMs).toBe(1_500);
       expect(result.value.windowMs).toBe(250);
-      expect(result.value.totalBytesTransferred).toBe(10 * 62_500);
+      // Every byte that really moved, ramp included — the warm-up discard
+      // shapes the reported *rate*, not the data-used total.
+      expect(result.value.totalBytesTransferred).toBe(10 * 62_500 + RAMP_BYTES);
     }
   });
 
@@ -82,7 +105,7 @@ describe('computeThroughputResult', () => {
 
   it('keeps the median stable against a single mid-test stall, unlike a plain average would', () => {
     const samples = evenSamples(9, 62_500);
-    samples[4] = sample(1_500 + 4 * 250, 0); // one stalled window among nine — a plain mean would drop noticeably, the median should not
+    samples[steadyIndex(4)] = sample(1_500 + 4 * 250, 0); // one stalled window among nine — a plain mean would drop noticeably, the median should not
     const result = computeThroughputResult(samples, 'download', OPTIONS);
     expect(isOk(result)).toBe(true);
     if (isOk(result)) {

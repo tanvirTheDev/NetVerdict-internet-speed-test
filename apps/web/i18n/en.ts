@@ -34,13 +34,23 @@ export const dictionary = {
       jitter: 'Jitter',
       packetLoss: 'Packet loss',
       streams: 'streams',
-      unavailableBufferbloat:
-        'Bufferbloat grading lands in a later build phase — it needs a loaded-latency probe this build doesn’t run yet.',
+      server: 'Test server',
+      serverExplainer:
+        'Measured against Cloudflare’s nearest edge, not a server inside your ISP’s own network. Tools that use an in-network server measure a shorter path and usually report a higher number; this one reflects what your connection does reaching the wider internet.',
+      underLoadHeading: 'While your connection is busy',
+      loadedLatencyDown: 'Latency (downloading)',
+      loadedLatencyUp: 'Latency (uploading)',
+      bufferbloatDown: 'Bufferbloat (down)',
+      bufferbloatUp: 'Bufferbloat (up)',
+      rpm: 'RPM',
+      rpmExplainer: 'Higher = your connection stays responsive when busy.',
     },
     error: {
       heading: 'That didn’t work',
       networkUnavailable: 'Your connection dropped mid-test. Check your network and try again.',
       endpointRejected: 'The measurement server rejected the request. Try again in a moment.',
+      endpointRateLimited:
+        'The measurement server is limiting how often you can test. Wait a minute and try again — this says nothing about your connection.',
       corsBlocked:
         'A network policy blocked the test. If you’re on a work or school network, this may be a firewall.',
       timeout: 'The test took too long to respond and timed out.',

@@ -9,6 +9,7 @@ import { t } from '../../../i18n/index';
 const MESSAGE_BY_CODE: Record<EngineErrorCode, string> = {
   NETWORK_UNAVAILABLE: t.test.error.networkUnavailable,
   ENDPOINT_REJECTED: t.test.error.endpointRejected,
+  ENDPOINT_RATE_LIMITED: t.test.error.endpointRateLimited,
   CORS_BLOCKED: t.test.error.corsBlocked,
   TIMEOUT: t.test.error.timeout,
   ABORTED_BY_USER: t.test.error.unknown,

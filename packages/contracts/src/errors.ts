@@ -9,6 +9,14 @@ import { z } from 'zod';
 export const ENGINE_ERROR_CODES = [
   'NETWORK_UNAVAILABLE',
   'ENDPOINT_REJECTED',
+  /**
+   * The endpoint is throttling us (HTTP 429), not failing. Distinct from
+   * ENDPOINT_REJECTED because the user-facing advice is completely
+   * different — "wait a minute, or pick another server" versus "this
+   * endpoint is broken" — and because a run rate-limited into silence
+   * would otherwise read as a connection with no download speed.
+   */
+  'ENDPOINT_RATE_LIMITED',
   'CORS_BLOCKED',
   'TIMEOUT',
   'ABORTED_BY_USER',
@@ -39,5 +47,5 @@ export const engineErrorSchema = z.object({
 export type EngineError = z.infer<typeof engineErrorSchema>;
 
 export function isRetriableCode(code: EngineErrorCode): boolean {
-  return code === 'TIMEOUT' || code === 'NETWORK_UNAVAILABLE';
+  return code === 'TIMEOUT' || code === 'NETWORK_UNAVAILABLE' || code === 'ENDPOINT_RATE_LIMITED';
 }

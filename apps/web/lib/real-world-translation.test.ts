@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TestResult } from '@netverdict/contracts';
+import type { BufferbloatGrade, TestResult } from '@netverdict/contracts';
 import { translateToRealWorldCapabilities } from './real-world-translation';
 
 function baseResult(overrides: {
@@ -7,8 +7,17 @@ function baseResult(overrides: {
   upMbps?: number;
   idleLatencyMs?: number;
   downStatus?: 'complete' | 'unavailable';
+  gradeDown?: BufferbloatGrade | 'unavailable';
+  gradeUp?: BufferbloatGrade | 'unavailable';
 }): TestResult {
-  const { downMbps = 50, upMbps = 20, idleLatencyMs = 20, downStatus = 'complete' } = overrides;
+  const {
+    downMbps = 50,
+    upMbps = 20,
+    idleLatencyMs = 20,
+    downStatus = 'complete',
+    gradeDown = 'unavailable',
+    gradeUp = 'unavailable',
+  } = overrides;
   return {
     conditions: {
       startedAtEpochMs: 0,
@@ -61,8 +70,8 @@ function baseResult(overrides: {
     },
     loadedLatencyDown: { status: 'unavailable' },
     loadedLatencyUp: { status: 'unavailable' },
-    bufferbloatGradeDown: 'unavailable',
-    bufferbloatGradeUp: 'unavailable',
+    bufferbloatGradeDown: gradeDown,
+    bufferbloatGradeUp: gradeUp,
     rpm: {},
     isPartial: false,
     anomalyFlag: false,
@@ -109,10 +118,31 @@ describe('translateToRealWorldCapabilities', () => {
     expect(translation.videoCalls.status).toBe('unavailable');
   });
 
-  it('always reports gaming as unavailable — idle latency must never stand in for bufferbloat', () => {
+  it('reports gaming unavailable without a bufferbloat grade — idle latency must never stand in for it', () => {
     const fast = translateToRealWorldCapabilities(
       baseResult({ downMbps: 500, upMbps: 500, idleLatencyMs: 5 }),
     );
     expect(fast.gaming.status).toBe('unavailable');
+  });
+
+  it('marks gaming supported when the link holds its latency under load', () => {
+    const translation = translateToRealWorldCapabilities(
+      baseResult({ gradeDown: 'A', gradeUp: 'A+' }),
+    );
+    expect(translation.gaming.status).toBe('supported');
+  });
+
+  it('marks gaming unsupported on a bloated link, however fast it is', () => {
+    const translation = translateToRealWorldCapabilities(
+      baseResult({ downMbps: 900, upMbps: 900, idleLatencyMs: 3, gradeDown: 'A+', gradeUp: 'F' }),
+    );
+    expect(translation.gaming.status).toBe('not-supported');
+  });
+
+  it('judges gaming by the worse direction — upload bloat ruins a game just as thoroughly', () => {
+    const translation = translateToRealWorldCapabilities(
+      baseResult({ gradeDown: 'A+', gradeUp: 'D' }),
+    );
+    expect(translation.gaming.status).toBe('not-supported');
   });
 });
