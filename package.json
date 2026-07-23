@@ -14,7 +14,7 @@
     "services/*"
   ],
   "scripts": {
-    "prepare": "husky",
+    "prepare": "node .husky/install.mjs",
     "build": "npm run build --workspaces --if-present",
     "dev": "npm run dev --workspace=apps/web",
     "lint": "eslint .",
