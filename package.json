@@ -1,0 +1,61 @@
+{
+  "name": "netverdict",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NetVerdict — Internet quality & ISP accountability platform",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "packageManager": "npm@11.18.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "prepare": "husky",
+    "build": "npm run build --workspaces --if-present",
+    "dev": "npm run dev --workspace=apps/web",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "knip": "knip",
+    "depcruise:engine": "depcruise packages/engine/src --config .dependency-cruiser.cjs",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test:coverage && npm run build"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "21.2.1",
+    "@commitlint/config-conventional": "21.2.0",
+    "@eslint/js": "9.39.5",
+    "@playwright/test": "1.61.1",
+    "@types/node": "24.13.3",
+    "@vitest/coverage-v8": "4.1.10",
+    "dependency-cruiser": "18.1.0",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.7.0",
+    "husky": "9.1.7",
+    "knip": "6.27.0",
+    "lint-staged": "17.1.1",
+    "prettier": "3.9.6",
+    "tsx": "4.23.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.65.0",
+    "vitest": "4.1.10"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix"
+    ],
+    "*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml}": [
+      "prettier --write"
+    ]
+  }
+}

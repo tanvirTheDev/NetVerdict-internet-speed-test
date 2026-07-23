@@ -1,0 +1,36 @@
+# dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# build outputs
+.next/
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# env
+.env
+.env.*
+!.env.example
+
+# test / coverage
+coverage/
+playwright-report/
+test-results/
+.vitest-cache/
+
+# logs
+*.log
+npm-debug.log*
+
+# editor / OS
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# misc
+.turbo/
+.vercel/

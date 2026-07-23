@@ -1,0 +1,26 @@
+{
+  "name": "@netverdict/db",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Drizzle schema, migrations, and a typed connection factory for Neon Postgres. No process.env access — the connection string is injected by the caller.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -b --pretty",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "1.1.0",
+    "@netverdict/contracts": "0.1.0",
+    "drizzle-orm": "0.45.2"
+  },
+  "devDependencies": {
+    "drizzle-kit": "0.31.10",
+    "typescript": "5.9.3"
+  }
+}

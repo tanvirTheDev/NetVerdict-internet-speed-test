@@ -1,0 +1,10 @@
+node_modules
+dist
+.next
+coverage
+playwright-report
+test-results
+package-lock.json
+*.tsbuildinfo
+# Next.js generates and regenerates this file; it explicitly asks not to be edited.
+apps/web/next-env.d.ts

@@ -1,0 +1,46 @@
+@import 'tailwindcss';
+
+/*
+ * Instrument-panel palette (validated for CVD/contrast — see the dataviz
+ * skill's palette reference). Download/upload map to fixed series colors
+ * everywhere (chart, gauge, badges) so color always tracks the same
+ * meaning, never a re-cycled hue (§ dataviz non-negotiables).
+ */
+@theme {
+  --color-surface: #fcfcfb;
+  --color-surface-dark: #1a1a19;
+  --color-page: #f9f9f7;
+  --color-page-dark: #0d0d0d;
+  --color-ink: #0b0b0b;
+  --color-ink-dark: #ffffff;
+  --color-ink-secondary: #52514e;
+  --color-ink-secondary-dark: #c3c2b7;
+  --color-ink-muted: #898781;
+  --color-hairline: #e1e0d9;
+  --color-hairline-dark: #2c2c2a;
+
+  --color-download: #2a78d6;
+  --color-download-dark: #3987e5;
+  --color-upload: #1baf7a;
+  --color-upload-dark: #199e70;
+
+  --color-status-good: #0ca30c;
+  --color-status-warning: #fab219;
+  --color-status-serious: #ec835a;
+  --color-status-critical: #d03b3b;
+
+  --font-mono-figures:
+    ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+
+body {
+  background: var(--color-page);
+  color: var(--color-ink);
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background: var(--color-page-dark);
+    color: var(--color-ink-dark);
+  }
+}

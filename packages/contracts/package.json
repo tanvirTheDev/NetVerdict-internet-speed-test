@@ -1,0 +1,20 @@
+{
+  "name": "@netverdict/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Wire-format contracts: Zod schemas + inferred types shared by every layer. No framework deps.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -b --pretty",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}
